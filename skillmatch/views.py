@@ -12,7 +12,7 @@ from .serializers import (
 )
 from .core import (
     safe_serialize, async_to_sync_view,
-    fetch_object, fetch_objects, check_exists, save_object, serialize_object,
+    fetch_object, fetch_objects, check_exists, save_object,
     SafeSerializationMixin
 )
 from .services import parse_cv_file, rank_candidate
@@ -105,52 +105,6 @@ class CandidateViewSet(SafeSerializationMixin, viewsets.ReadOnlyModelViewSet):
     filter_backends = [filters.SearchFilter]
     search_fields = ['name', 'skills']
 
-    def _fix_status_field(self, data):
-        """Fix the status field in the serialized data."""
-        if isinstance(data, dict) and 'status' in data:
-            # Check if status is a CharField representation
-            if isinstance(data['status'], str) and data['status'].startswith('<django.db.models'):
-                # Replace with actual status value
-                candidates = {c.id: c.status for c in Candidate.objects.all()}
-                if data.get('id') in candidates:
-                    data['status'] = candidates[data['id']]
-        return data
-
-    def retrieve(self, request, *args, **kwargs):
-        """Override retrieve to use safe serialization."""
-        instance = self.get_object()
-        serializer = self.get_serializer(instance)
-
-        # Apply direct fix for status field
-        serialized_data = safe_serialize(serializer)
-        fixed_data = self._fix_status_field(serialized_data)
-
-        return Response(fixed_data)
-
-    def list(self, request, *args, **kwargs):
-        """Override list to use safe serialization."""
-        queryset = self.filter_queryset(self.get_queryset())
-
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            data = safe_serialize(serializer)
-
-            # Fix status fields in each item if it's a list of dicts
-            if isinstance(data, dict) and 'results' in data and isinstance(data['results'], list):
-                data['results'] = [self._fix_status_field(item) for item in data['results']]
-
-            return self.get_paginated_response(data)
-
-        serializer = self.get_serializer(queryset, many=True)
-        data = safe_serialize(serializer)
-
-        # Fix status fields in each item if it's a list
-        if isinstance(data, list):
-            data = [self._fix_status_field(item) for item in data]
-
-        return Response(data)
-
 
 class JobViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
     """
@@ -160,51 +114,6 @@ class JobViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
     serializer_class = JobSerializer
     filter_backends = [filters.SearchFilter]
     search_fields = ['title', 'requirements']
-
-    def create(self, request, *args, **kwargs):
-        """Override create to ensure proper serialization."""
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        job = serializer.save()
-
-        # Re-serialize with our custom serializer
-        response_serializer = self.get_serializer(job)
-        return Response(
-            safe_serialize(response_serializer),
-            status=status.HTTP_201_CREATED
-        )
-
-    def update(self, request, *args, **kwargs):
-        """Override update to ensure proper serialization."""
-        partial = kwargs.pop('partial', False)
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-        job = serializer.save()
-
-        # Re-serialize with our custom serializer
-        response_serializer = self.get_serializer(job)
-        return Response(
-            safe_serialize(response_serializer)
-        )
-
-    def retrieve(self, request, *args, **kwargs):
-        """Override retrieve to use safe serialization."""
-        instance = self.get_object()
-        serializer = self.get_serializer(instance)
-        return Response(safe_serialize(serializer))
-
-    def list(self, request, *args, **kwargs):
-        """Override list to use safe serialization."""
-        queryset = self.filter_queryset(self.get_queryset())
-
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(safe_serialize(serializer))
-
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(safe_serialize(serializer))
 
 
 class MatchViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
@@ -217,24 +126,6 @@ class MatchViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
         if self.action == 'list':
             return MatchListSerializer
         return MatchSerializer
-
-    def retrieve(self, request, *args, **kwargs):
-        """Override retrieve to use safe serialization."""
-        instance = self.get_object()
-        serializer = self.get_serializer(instance)
-        return Response(safe_serialize(serializer))
-
-    def list(self, request, *args, **kwargs):
-        """Override list to use safe serialization."""
-        queryset = self.filter_queryset(self.get_queryset())
-
-        page = self.paginate_queryset(queryset)
-        if page is not None:
-            serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response(safe_serialize(serializer))
-
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(safe_serialize(serializer))
 
     @action(detail=False, methods=['post'])
     @async_to_sync_view
