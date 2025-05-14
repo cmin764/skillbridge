@@ -16,11 +16,6 @@ class JobSerializer(serializers.ModelSerializer):
     """
     Serializer for job postings.
     """
-    status = serializers.SerializerMethodField()
-
-    def get_status(self, obj):
-        """Get the actual status value as a string."""
-        return obj.status
 
     class Meta:
         model = Job
@@ -38,11 +33,6 @@ class CandidateSerializer(serializers.ModelSerializer):
         write_only=True,
         source='source_cv'
     )
-    status = serializers.SerializerMethodField()
-
-    def get_status(self, obj):
-        """Get the actual status value as a string."""
-        return obj.status
 
     class Meta:
         model = Candidate
