@@ -1,5 +1,5 @@
 """
-Utility package for skillmatch app.
+Core utilities for the skillmatch app.
 """
 from .serializers import safe_serialize, _deep_convert
 from .async_helpers import (
@@ -7,7 +7,6 @@ from .async_helpers import (
     check_exists, save_object, serialize_object
 )
 from .mixins import SafeSerializationMixin
-from .ai import parse_cv_file, rank_candidate
 
 __all__ = [
     'safe_serialize',
@@ -18,6 +17,4 @@ __all__ = [
     'save_object',
     'serialize_object',
     'SafeSerializationMixin',
-    'parse_cv_file',
-    'rank_candidate',
 ]

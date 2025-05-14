@@ -4,66 +4,18 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from asgiref.sync import sync_to_async
-import asyncio
-import functools
 
 from .models import CVUpload, Candidate, Job, Match
 from .serializers import (
     CVUploadSerializer, CandidateSerializer,
     JobSerializer, MatchSerializer, MatchListSerializer
 )
-from .utils import (
+from .core import (
     safe_serialize, async_to_sync_view,
     fetch_object, fetch_objects, check_exists, save_object, serialize_object,
     SafeSerializationMixin
 )
-from .utils.ai import parse_cv_file, rank_candidate
-
-
-# Decorator to make async views compatible with DRF
-def async_to_sync_view(func):
-    @functools.wraps(func)
-    def wrapped(*args, **kwargs):
-        return asyncio.run(func(*args, **kwargs))
-    return wrapped
-
-
-# Stub functions for AI parsing and ranking:
-async def parse_cv_file(file_obj) -> dict:
-    """
-    Parses a CV file to extract candidate information.
-    In a real implementation, this would call an LLM or NLP pipeline.
-    """
-    # Print debugging info
-    print(f"parse_cv_file called with file object: {file_obj}")
-    print(f"File object type: {type(file_obj)}")
-
-    # Mock response - in production this would use AI
-    return {
-        'name': 'Jane Doe',
-        'skills': ['Python', 'Django', 'AI'],
-        'experience_years': 5
-    }
-
-
-async def rank_candidate(candidate_data, job_data) -> dict:
-    """
-    Ranks a candidate against a job posting.
-    In a real implementation, this would prompt an LLM for scoring.
-    """
-    # Imagine this prompts an LLM for a score & rationale
-    candidate_skills = set(candidate_data.get('skills', []))
-    job_requirements = set(job_data.get('requirements', []))
-
-    # Calculate overlap between candidate skills and job requirements
-    matching_skills = candidate_skills.intersection(job_requirements)
-    score = len(matching_skills) / len(job_requirements) if job_requirements else 0
-
-    # Mock response - in production this would use AI
-    return {
-        'score': min(score * 100, 100),  # Scale to 0-100
-        'rationale': f'Candidate has {len(matching_skills)} of {len(job_requirements)} required skills'
-    }
+from .services import parse_cv_file, rank_candidate
 
 
 class CVUploadViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
@@ -436,60 +388,3 @@ class MatchViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
                 {"error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
-
-# Add this helper function to convert serializer data safely
-def safe_serialize(serializer):
-    """Convert serializer data to a JSON-safe format."""
-    try:
-        # For debugging
-        print(f"Serializing {type(serializer).__name__}")
-
-        # Handle different input types
-        if hasattr(serializer, 'data'):
-            # It's a serializer instance
-            data = serializer.data
-        else:
-            # It's already data
-            data = serializer
-
-        # For models with status fields, ensure they're properly handled
-        if isinstance(data, dict) and 'status' in data:
-            if str(data['status']).startswith('<django.db.models.fields'):
-                # Get the actual status from source if possible
-                if hasattr(serializer, 'instance') and hasattr(serializer.instance, 'status'):
-                    data['status'] = serializer.instance.status
-
-        # Force conversion to primitive types
-        return _deep_convert(data)
-    except Exception as e:
-        # Log the error and return a fallback
-        print(f"Serialization error: {e}")
-        import traceback
-        traceback.print_exc()
-
-        if hasattr(serializer, 'instance'):
-            # Try manual model conversion as last resort
-            try:
-                from django.forms.models import model_to_dict
-                model_dict = model_to_dict(serializer.instance)
-                return _deep_convert(model_dict)
-            except Exception as model_err:
-                print(f"Model conversion error: {model_err}")
-
-        return {"error": "Could not serialize data", "detail": str(e)}
-
-# Simpler helper to convert nested structures
-def _deep_convert(data):
-    """Deep convert any value to JSON-serializable types."""
-    if data is None:
-        return None
-    elif isinstance(data, (str, int, float, bool)):
-        return data
-    elif isinstance(data, dict):
-        return {k: _deep_convert(v) for k, v in data.items()}
-    elif isinstance(data, (list, tuple)):
-        return [_deep_convert(item) for item in data]
-    else:
-        # For any other type (including Django fields), use string representation
-        return str(data)
