@@ -26,7 +26,7 @@ class CVUploadViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
     serializer_class = CVUploadSerializer
     parser_classes = [MultiPartParser]  # handles multipart file uploads
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], url_name='parse')
     @async_to_sync_view
     async def parse(self, request, pk=None):
         """
@@ -127,7 +127,7 @@ class MatchViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
             return MatchListSerializer
         return MatchSerializer
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], url_name='create-match')
     @async_to_sync_view
     async def create_match(self, request):
         """
@@ -204,7 +204,7 @@ class MatchViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-    @action(detail=False, methods=['post'])
+    @action(detail=False, methods=['post'], url_name='match-candidates')
     @async_to_sync_view
     async def match_candidates(self, request):
         """
