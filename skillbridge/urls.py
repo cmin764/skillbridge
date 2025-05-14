@@ -16,8 +16,24 @@ Including another URLconf
 """
 
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
+from django.conf import settings
+from django.conf.urls.static import static
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+# Disabled due to docs issue with `coreapi`
+# from rest_framework.documentation import include_docs_urls
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("", include("skillmatch.urls")),
+    path("api-auth/", include("rest_framework.urls")),
+    # JWT token endpoints
+    path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    # Commenting out docs URL
+    # path("docs/", include_docs_urls(title="SkillBridge API")),
 ]
+
+# Serve media files in development
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

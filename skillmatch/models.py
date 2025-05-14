@@ -32,7 +32,7 @@ class CVUpload(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
 
-class Candidate(models.Model, StatusMixin):
+class Candidate(StatusMixin, models.Model):
     """
     Parsed candidate profile.
     """
@@ -43,15 +43,29 @@ class Candidate(models.Model, StatusMixin):
     experience_years = models.IntegerField()
     source_cv = models.OneToOneField(CVUpload, on_delete=models.CASCADE)
     parsed_at = models.DateTimeField(auto_now_add=True)
+    # Explicit status field to ensure it's included in the migration
+    status = models.CharField(
+        max_length=10,
+        choices=StatusMixin.STATUS_CHOICES,
+        default='active',
+        help_text=_('Whether this record is active or inactive')
+    )
 
 
-class Job(models.Model, StatusMixin):
+class Job(StatusMixin, models.Model):
     """
     Job postings to match against.
     """
     title = models.CharField(max_length=200)
     requirements = ArrayField(models.CharField(max_length=100), default=list)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Explicit status field to ensure it's included in the migration
+    status = models.CharField(
+        max_length=10,
+        choices=StatusMixin.STATUS_CHOICES,
+        default='active',
+        help_text=_('Whether this record is active or inactive')
+    )
 
 
 class Match(models.Model):
