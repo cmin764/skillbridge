@@ -4,23 +4,24 @@ from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils.translation import gettext_lazy as _
 
 
-class StatusMixin:
+class StatusBase(models.Model):
     """
-    A true mixin that provides a status field with active/inactive choices.
-    This doesn't inherit from models.Model to avoid multiple inheritance issues.
+    A proper abstract mixin that provides a status field with active/inactive choices.
     """
     STATUS_CHOICES = [
         ('active', _('Active')),
         ('inactive', _('Inactive')),
     ]
 
-    # This will be added to the model's class attributes
     status = models.CharField(
         max_length=10,
         choices=STATUS_CHOICES,
         default='active',
         help_text=_('Whether this record is active or inactive')
     )
+
+    class Meta:
+        abstract = True  # Mark as abstract so no DB table is created
 
 
 class CVUpload(models.Model):
@@ -32,7 +33,7 @@ class CVUpload(models.Model):
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
 
-class Candidate(StatusMixin, models.Model):
+class Candidate(StatusBase):
     """
     Parsed candidate profile.
     """
@@ -43,29 +44,15 @@ class Candidate(StatusMixin, models.Model):
     experience_years = models.IntegerField()
     source_cv = models.OneToOneField(CVUpload, on_delete=models.CASCADE)
     parsed_at = models.DateTimeField(auto_now_add=True)
-    # Explicit status field to ensure it's included in the migration
-    status = models.CharField(
-        max_length=10,
-        choices=StatusMixin.STATUS_CHOICES,
-        default='active',
-        help_text=_('Whether this record is active or inactive')
-    )
 
 
-class Job(StatusMixin, models.Model):
+class Job(StatusBase):
     """
     Job postings to match against.
     """
     title = models.CharField(max_length=200)
     requirements = ArrayField(models.CharField(max_length=100), default=list)
     created_at = models.DateTimeField(auto_now_add=True)
-    # Explicit status field to ensure it's included in the migration
-    status = models.CharField(
-        max_length=10,
-        choices=StatusMixin.STATUS_CHOICES,
-        default='active',
-        help_text=_('Whether this record is active or inactive')
-    )
 
 
 class Match(models.Model):

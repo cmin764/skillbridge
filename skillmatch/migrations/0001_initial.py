@@ -53,7 +53,7 @@ class Migration(migrations.Migration):
                 ),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
             ],
-            bases=(models.Model, skillmatch.models.StatusMixin),
+            bases=(skillmatch.models.StatusBase,),
         ),
         migrations.CreateModel(
             name="Candidate",
@@ -88,7 +88,7 @@ class Migration(migrations.Migration):
                     ),
                 ),
             ],
-            bases=(models.Model, skillmatch.models.StatusMixin),
+            bases=(skillmatch.models.StatusBase,),
         ),
         migrations.CreateModel(
             name="Match",
