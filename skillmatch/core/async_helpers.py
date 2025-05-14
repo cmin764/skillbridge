@@ -4,6 +4,7 @@ Async utilities for the skillmatch app.
 import functools
 import asyncio
 from asgiref.sync import sync_to_async
+from django.db import transaction
 
 
 def async_to_sync_view(func):
@@ -26,6 +27,33 @@ async def fetch_object(model_cls, **lookup):
     """
     get_object = sync_to_async(lambda: model_cls.objects.get(**lookup))
     return await get_object()
+
+
+async def fetch_object_or_none(model_cls, **lookup):
+    """
+    Async helper to fetch a single object from the database or None if it doesn't exist.
+    Safer than fetch_object as it won't raise a DoesNotExist exception.
+
+    Example:
+        user = await fetch_object_or_none(User, id=1)
+    """
+    get_object = sync_to_async(lambda: model_cls.objects.filter(**lookup).first())
+    return await get_object()
+
+
+async def run_in_transaction(func, *args, **kwargs):
+    """
+    Run a function inside a database transaction in a way that's compatible with async.
+
+    Example:
+        result = await run_in_transaction(create_user, username='john')
+    """
+    @sync_to_async
+    def _run_in_transaction():
+        with transaction.atomic():
+            return func(*args, **kwargs)
+
+    return await _run_in_transaction()
 
 
 async def fetch_objects(model_cls, **filters):

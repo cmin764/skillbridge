@@ -4,6 +4,7 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from asgiref.sync import sync_to_async
+import asyncio
 
 from .models import CVUpload, Candidate, Job, Match
 from .serializers import (
@@ -12,8 +13,8 @@ from .serializers import (
 )
 from .core import (
     safe_serialize, async_to_sync_view,
-    fetch_object, fetch_objects, check_exists, save_object,
-    SafeSerializationMixin
+    fetch_objects, check_exists,
+    SafeSerializationMixin, fetch_object_or_none, run_in_transaction
 )
 from .services import parse_cv_file, rank_candidate
 
@@ -36,8 +37,15 @@ class CVUploadViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
         print(f"Parse method called with pk={pk}")
 
         try:
-            # Get the CV upload object
-            upload = await fetch_object(CVUpload, pk=pk)
+            # Get the CV upload object using safer fetch_object_or_none
+            upload = await fetch_object_or_none(CVUpload, pk=pk)
+
+            if not upload:
+                return Response(
+                    {"error": f"CVUpload with id {pk} not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
             print(f"Found upload object: {upload.id}")
 
             # Get the mock data
@@ -49,16 +57,17 @@ class CVUploadViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
             print(f"Candidate exists: {candidate_exists}")
 
             if candidate_exists:
-                # Update existing candidate
-                candidate = await fetch_object(Candidate, source_cv=upload)
+                # Define a function to update the candidate within a transaction
+                def update_candidate():
+                    candidate = Candidate.objects.get(source_cv=upload)
+                    candidate.name = data['name']
+                    candidate.skills = data['skills']
+                    candidate.experience_years = data['experience_years']
+                    candidate.save()
+                    return candidate
 
-                # Update fields
-                candidate.name = data['name']
-                candidate.skills = data['skills']
-                candidate.experience_years = data['experience_years']
-
-                # Save the updated candidate
-                await save_object(candidate)
+                # Run the update in a transaction
+                candidate = await run_in_transaction(update_candidate)
                 print(f"Updated candidate: {candidate.id}")
 
                 # Create response serializer and use safe serialization
@@ -68,13 +77,18 @@ class CVUploadViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
                     status=status.HTTP_200_OK
                 )
             else:
-                # Create new candidate
-                print("Creating new candidate")
-                data['cv_id'] = upload.id
+                # Define a function to create a new candidate within a transaction
+                def create_candidate():
+                    serializer = CandidateSerializer(data={'name': data['name'],
+                                                         'skills': data['skills'],
+                                                         'experience_years': data['experience_years'],
+                                                         'cv_id': upload.id})
+                    serializer.is_valid(raise_exception=True)
+                    return serializer.save()
 
-                serializer = CandidateSerializer(data=data)
-                await sync_to_async(serializer.is_valid)(raise_exception=True)
-                candidate = await sync_to_async(serializer.save)()
+                # Create new candidate in a transaction
+                print("Creating new candidate")
+                candidate = await run_in_transaction(create_candidate)
                 print(f"Created candidate: {candidate.id}")
 
                 # Create response serializer and use safe serialization
@@ -139,29 +153,50 @@ class MatchViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
             candidate_id = request.data.get('candidate_id')
             job_id = request.data.get('job_id')
 
-            candidate = await fetch_object(Candidate, pk=candidate_id)
-            job = await fetch_object(Job, pk=job_id)
+            # Use fetch_object_or_none for safer queries
+            candidate = await fetch_object_or_none(Candidate, pk=candidate_id)
+            job = await fetch_object_or_none(Job, pk=job_id)
+
+            if not candidate:
+                return Response(
+                    {"error": f"Candidate with id {candidate_id} not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            if not job:
+                return Response(
+                    {"error": f"Job with id {job_id} not found."},
+                    status=status.HTTP_404_NOT_FOUND
+                )
 
             # Check if a match already exists
             match_exists = await check_exists(Match, candidate=candidate, job=job)
 
             if match_exists:
-                # Get existing match
-                match = await fetch_object(Match, candidate=candidate, job=job)
+                # Define function to update match in transaction
+                def update_match():
+                    match = Match.objects.get(candidate=candidate, job=job)
 
-                # Recalculate score (optionally)
-                if request.data.get('recalculate', True):
-                    # Get serialized data
-                    candidate_data = safe_serialize(CandidateSerializer(candidate))
-                    job_data = safe_serialize(JobSerializer(job))
+                    # Only recalculate if requested
+                    if request.data.get('recalculate', True):
+                        # Get serialized data for the ranking
+                        candidate_data = safe_serialize(CandidateSerializer(candidate))
+                        job_data = safe_serialize(JobSerializer(job))
 
-                    # Calculate match score and rationale
-                    result = await rank_candidate(candidate_data, job_data)
+                        # This is async so need to get result synchronously in this function
+                        loop = asyncio.new_event_loop()
+                        result = loop.run_until_complete(rank_candidate(candidate_data, job_data))
+                        loop.close()
 
-                    # Update the match
-                    match.score = result['score']
-                    match.rationale = result['rationale']
-                    await save_object(match)
+                        # Update the match
+                        match.score = result['score']
+                        match.rationale = result['rationale']
+
+                    match.save()
+                    return match
+
+                # Run update in transaction
+                match = await run_in_transaction(update_match)
 
                 # Return the existing match
                 match_serializer = MatchSerializer(match)
@@ -180,14 +215,19 @@ class MatchViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
             # Calculate match score and rationale
             result = await rank_candidate(candidate_data, job_data)
 
-            # Create and save the match
-            match = Match(
-                candidate=candidate,
-                job=job,
-                score=result['score'],
-                rationale=result['rationale']
-            )
-            await save_object(match)
+            # Define function to create match in transaction
+            def create_match():
+                match = Match(
+                    candidate=candidate,
+                    job=job,
+                    score=result['score'],
+                    rationale=result['rationale']
+                )
+                match.save()
+                return match
+
+            # Create and save the match in a transaction
+            match = await run_in_transaction(create_match)
 
             # Return the serialized match
             match_serializer = MatchSerializer(match)
@@ -220,46 +260,45 @@ class MatchViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
             created_matches = []
             updated_matches = []
 
-            # Create matches for each candidate-job pair
+            # Process each candidate-job pair
             for candidate in candidates:
                 for job in jobs:
+                    # Get serialized data for ranking
+                    candidate_data = safe_serialize(CandidateSerializer(candidate))
+                    job_data = safe_serialize(JobSerializer(job))
+
+                    # Calculate match score and rationale
+                    result = await rank_candidate(candidate_data, job_data)
+
                     # Check if match already exists
                     match_exists = await check_exists(Match, candidate=candidate, job=job)
 
                     if match_exists:
-                        # Update existing match
-                        match = await fetch_object(Match, candidate=candidate, job=job)
+                        # Define function to update match in transaction
+                        def update_match():
+                            match = Match.objects.get(candidate=candidate, job=job)
+                            match.score = result['score']
+                            match.rationale = result['rationale']
+                            match.save()
+                            return match
 
-                        # Get the data and calculate score
-                        candidate_data = safe_serialize(CandidateSerializer(candidate))
-                        job_data = safe_serialize(JobSerializer(job))
-
-                        # Recalculate score and rationale
-                        result = await rank_candidate(candidate_data, job_data)
-
-                        # Update match data
-                        match.score = result['score']
-                        match.rationale = result['rationale']
-                        await save_object(match)
+                        # Update existing match in transaction
+                        match = await run_in_transaction(update_match)
                         updated_matches.append(match)
-
                     else:
-                        # Create new match
-                        # Serialize for the ranking function
-                        candidate_data = safe_serialize(CandidateSerializer(candidate))
-                        job_data = safe_serialize(JobSerializer(job))
+                        # Define function to create match in transaction
+                        def create_match():
+                            match = Match(
+                                candidate=candidate,
+                                job=job,
+                                score=result['score'],
+                                rationale=result['rationale']
+                            )
+                            match.save()
+                            return match
 
-                        # Calculate match score and rationale
-                        result = await rank_candidate(candidate_data, job_data)
-
-                        # Create and save the match
-                        match = Match(
-                            candidate=candidate,
-                            job=job,
-                            score=result['score'],
-                            rationale=result['rationale']
-                        )
-                        await save_object(match)
+                        # Create new match in transaction
+                        match = await run_in_transaction(create_match)
                         created_matches.append(match)
 
             # Return summary information
