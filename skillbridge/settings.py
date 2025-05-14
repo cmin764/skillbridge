@@ -85,6 +85,7 @@ DATABASES = {
         "PASSWORD": "password",     # Database password
         "HOST": "localhost",        # Database host
         "PORT": "5432",             # Database port
+        'CONN_MAX_AGE': 0,
     }
 }
 

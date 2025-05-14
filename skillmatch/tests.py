@@ -7,6 +7,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch
+from django.db import connections
 
 from .models import CVUpload, Candidate, Job, Match
 
@@ -184,3 +185,8 @@ class SkillMatchIntegrationTestCase(TransactionTestCase):
         matches_response = self.client.get(reverse('match-list'))
         self.assertEqual(matches_response.status_code, 200, "Matches retrieval failed")
         self.assertGreaterEqual(len(matches_response.data['results']), 1)
+
+
+def tearDownModule():
+    for conn in connections.all():
+        conn.close()
