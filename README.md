@@ -59,22 +59,8 @@ uvicorn skillbridge.asgi:application --reload
 
 Access the site at http://127.0.0.1:8000/
 
-### Admin Access
+Admin interface is available at http://127.0.0.1:8000/admin/ (login with the superuser you created)
 
-To access the Django admin interface:
+## API Documentation
 
-1. Create a superuser if you haven't already:
-```bash
-python manage.py createsuperuser
-```
-
-2. You'll be prompted to enter:
-   - Username (e.g., `cmin764`)
-   - Email address (e.g., `your.email@example.com`)
-   - Password (twice)
-   
-   Note: If you get a "password too common" warning, you can bypass validation by entering `y`.
-
-3. Access the admin interface at http://127.0.0.1:8000/admin/
-
-4. Log in with the superuser credentials you created
+For API request examples using the HTTPie tool, see [API Request Examples](docs/request-examples.md).
