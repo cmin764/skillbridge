@@ -12,6 +12,12 @@ from .serializers import (
     CVUploadSerializer, CandidateSerializer,
     JobSerializer, MatchSerializer, MatchListSerializer
 )
+from .utils import (
+    safe_serialize, async_to_sync_view,
+    fetch_object, fetch_objects, check_exists, save_object, serialize_object,
+    SafeSerializationMixin
+)
+from .utils.ai import parse_cv_file, rank_candidate
 
 
 # Decorator to make async views compatible with DRF
@@ -60,7 +66,7 @@ async def rank_candidate(candidate_data, job_data) -> dict:
     }
 
 
-class CVUploadViewSet(viewsets.ModelViewSet):
+class CVUploadViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
     """
     API endpoint for CV uploads.
     """
@@ -79,7 +85,7 @@ class CVUploadViewSet(viewsets.ModelViewSet):
 
         try:
             # Get the CV upload object
-            upload = await sync_to_async(self.get_object)()
+            upload = await fetch_object(CVUpload, pk=pk)
             print(f"Found upload object: {upload.id}")
 
             # Get the mock data
@@ -87,17 +93,12 @@ class CVUploadViewSet(viewsets.ModelViewSet):
             print(f"Parsed data: {data}")
 
             # Check if a Candidate already exists for this CV
-            candidate_exists = await sync_to_async(
-                lambda: Candidate.objects.filter(source_cv=upload).exists()
-            )()
-
+            candidate_exists = await check_exists(Candidate, source_cv=upload)
             print(f"Candidate exists: {candidate_exists}")
 
             if candidate_exists:
                 # Update existing candidate
-                candidate = await sync_to_async(
-                    lambda: Candidate.objects.get(source_cv=upload)
-                )()
+                candidate = await fetch_object(Candidate, source_cv=upload)
 
                 # Update fields
                 candidate.name = data['name']
@@ -105,13 +106,11 @@ class CVUploadViewSet(viewsets.ModelViewSet):
                 candidate.experience_years = data['experience_years']
 
                 # Save the updated candidate
-                await sync_to_async(candidate.save)()
+                await save_object(candidate)
                 print(f"Updated candidate: {candidate.id}")
 
-                # Create response serializer and get the data directly
+                # Create response serializer and use safe serialization
                 response_serializer = CandidateSerializer(candidate)
-
-                # Use safe serialization
                 return Response(
                     safe_serialize(response_serializer),
                     status=status.HTTP_200_OK
@@ -122,15 +121,12 @@ class CVUploadViewSet(viewsets.ModelViewSet):
                 data['cv_id'] = upload.id
 
                 serializer = CandidateSerializer(data=data)
-                is_valid = await sync_to_async(serializer.is_valid)(raise_exception=True)
-                print(f"Serializer valid: {is_valid}")
-
+                await sync_to_async(serializer.is_valid)(raise_exception=True)
                 candidate = await sync_to_async(serializer.save)()
                 print(f"Created candidate: {candidate.id}")
 
                 # Create response serializer and use safe serialization
                 response_serializer = CandidateSerializer(candidate)
-
                 return Response(
                     safe_serialize(response_serializer),
                     status=status.HTTP_201_CREATED
@@ -148,7 +144,7 @@ class CVUploadViewSet(viewsets.ModelViewSet):
             )
 
 
-class CandidateViewSet(viewsets.ReadOnlyModelViewSet):
+class CandidateViewSet(SafeSerializationMixin, viewsets.ReadOnlyModelViewSet):
     """
     API endpoint for candidates (read-only).
     """
@@ -204,7 +200,7 @@ class CandidateViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(data)
 
 
-class JobViewSet(viewsets.ModelViewSet):
+class JobViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
     """
     API endpoint for job postings.
     """
@@ -259,7 +255,7 @@ class JobViewSet(viewsets.ModelViewSet):
         return Response(safe_serialize(serializer))
 
 
-class MatchViewSet(viewsets.ModelViewSet):
+class MatchViewSet(SafeSerializationMixin, viewsets.ModelViewSet):
     """
     API endpoint for candidate-job matches.
     """
@@ -295,74 +291,75 @@ class MatchViewSet(viewsets.ModelViewSet):
         Given candidate_id and job_id, computes and stores a Match.
         If a match already exists, it updates it instead of creating a duplicate.
         """
-        # Get objects using sync_to_async
-        get_candidate = sync_to_async(get_object_or_404)
-        get_job = sync_to_async(get_object_or_404)
+        try:
+            # Get the candidate and job
+            candidate_id = request.data.get('candidate_id')
+            job_id = request.data.get('job_id')
 
-        cand = await get_candidate(Candidate, pk=request.data.get('candidate_id'))
-        job = await get_job(Job, pk=request.data.get('job_id'))
+            candidate = await fetch_object(Candidate, pk=candidate_id)
+            job = await fetch_object(Job, pk=job_id)
 
-        # Check if a match already exists
-        match_exists = await sync_to_async(
-            lambda: Match.objects.filter(candidate=cand, job=job).exists()
-        )()
+            # Check if a match already exists
+            match_exists = await check_exists(Match, candidate=candidate, job=job)
 
-        if match_exists:
-            # Get the existing match
-            match = await sync_to_async(
-                lambda: Match.objects.get(candidate=cand, job=job)
-            )()
+            if match_exists:
+                # Get existing match
+                match = await fetch_object(Match, candidate=candidate, job=job)
 
-            # Recalculate score (optionally)
-            if request.data.get('recalculate', True):
-                # Get serialized data
-                cand_serializer = CandidateSerializer(cand)
-                job_serializer = JobSerializer(job)
-                candidate_data = await sync_to_async(lambda: cand_serializer.data)()
-                job_data = await sync_to_async(lambda: job_serializer.data)()
+                # Recalculate score (optionally)
+                if request.data.get('recalculate', True):
+                    # Get serialized data
+                    candidate_data = safe_serialize(CandidateSerializer(candidate))
+                    job_data = safe_serialize(JobSerializer(job))
 
-                # Calculate match score and rationale
-                result = await rank_candidate(candidate_data, job_data)
+                    # Calculate match score and rationale
+                    result = await rank_candidate(candidate_data, job_data)
 
-                # Update the match
-                match.score = result['score']
-                match.rationale = result['rationale']
-                await sync_to_async(match.save)()
+                    # Update the match
+                    match.score = result['score']
+                    match.rationale = result['rationale']
+                    await save_object(match)
 
-            # Return the existing match
+                # Return the existing match
+                match_serializer = MatchSerializer(match)
+                return Response(
+                    {
+                        **safe_serialize(match_serializer),
+                        "message": "Match already existed and was updated"
+                    },
+                    status=status.HTTP_200_OK
+                )
+
+            # Get serialized data
+            candidate_data = safe_serialize(CandidateSerializer(candidate))
+            job_data = safe_serialize(JobSerializer(job))
+
+            # Calculate match score and rationale
+            result = await rank_candidate(candidate_data, job_data)
+
+            # Create and save the match
+            match = Match(
+                candidate=candidate,
+                job=job,
+                score=result['score'],
+                rationale=result['rationale']
+            )
+            await save_object(match)
+
+            # Return the serialized match
             match_serializer = MatchSerializer(match)
             return Response(
-                {
-                    **safe_serialize(match_serializer),
-                    "message": "Match already existed and was updated"
-                },
-                status=status.HTTP_200_OK
+                safe_serialize(match_serializer),
+                status=status.HTTP_201_CREATED
             )
-
-        # Get serialized data
-        cand_serializer = CandidateSerializer(cand)
-        job_serializer = JobSerializer(job)
-        candidate_data = await sync_to_async(lambda: cand_serializer.data)()
-        job_data = await sync_to_async(lambda: job_serializer.data)()
-
-        # Calculate match score and rationale
-        result = await rank_candidate(candidate_data, job_data)
-
-        # Create and save the match
-        match = Match(
-            candidate=cand,
-            job=job,
-            score=result['score'],
-            rationale=result['rationale']
-        )
-        await sync_to_async(match.save)()
-
-        # Return the serialized match
-        match_serializer = MatchSerializer(match)
-        return Response(
-            safe_serialize(match_serializer),
-            status=status.HTTP_201_CREATED
-        )
+        except Exception as e:
+            print(f"Error in create_match: {e}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @action(detail=False, methods=['post'])
     @async_to_sync_view
@@ -371,76 +368,74 @@ class MatchViewSet(viewsets.ModelViewSet):
         Match all active candidates to all active jobs.
         Updates existing matches with new scores.
         """
-        # Get active candidates and jobs
-        get_candidates = sync_to_async(lambda: list(Candidate.objects.filter(status='active')))
-        get_jobs = sync_to_async(lambda: list(Job.objects.filter(status='active')))
+        try:
+            # Get active candidates and jobs
+            candidates = await fetch_objects(Candidate, status='active')
+            jobs = await fetch_objects(Job, status='active')
 
-        candidates = await get_candidates()
-        jobs = await get_jobs()
+            # Track created and updated matches
+            created_matches = []
+            updated_matches = []
 
-        # Track created and updated matches
-        created_matches = []
-        updated_matches = []
+            # Create matches for each candidate-job pair
+            for candidate in candidates:
+                for job in jobs:
+                    # Check if match already exists
+                    match_exists = await check_exists(Match, candidate=candidate, job=job)
 
-        # Create matches for each candidate-job pair
-        for candidate in candidates:
-            for job in jobs:
-                # Check if match already exists
-                match_exists = await sync_to_async(
-                    lambda: Match.objects.filter(candidate=candidate, job=job).exists()
-                )()
+                    if match_exists:
+                        # Update existing match
+                        match = await fetch_object(Match, candidate=candidate, job=job)
 
-                if match_exists:
-                    # Update existing match
-                    match = await sync_to_async(
-                        lambda: Match.objects.get(candidate=candidate, job=job)
-                    )()
+                        # Get the data and calculate score
+                        candidate_data = safe_serialize(CandidateSerializer(candidate))
+                        job_data = safe_serialize(JobSerializer(job))
 
-                    # Get the data and calculate score
-                    cand_serializer = CandidateSerializer(candidate)
-                    job_serializer = JobSerializer(job)
-                    candidate_data = await sync_to_async(lambda: cand_serializer.data)()
-                    job_data = await sync_to_async(lambda: job_serializer.data)()
+                        # Recalculate score and rationale
+                        result = await rank_candidate(candidate_data, job_data)
 
-                    # Recalculate score and rationale
-                    result = await rank_candidate(candidate_data, job_data)
+                        # Update match data
+                        match.score = result['score']
+                        match.rationale = result['rationale']
+                        await save_object(match)
+                        updated_matches.append(match)
 
-                    # Update match data
-                    match.score = result['score']
-                    match.rationale = result['rationale']
-                    await sync_to_async(match.save)()
-                    updated_matches.append(match)
+                    else:
+                        # Create new match
+                        # Serialize for the ranking function
+                        candidate_data = safe_serialize(CandidateSerializer(candidate))
+                        job_data = safe_serialize(JobSerializer(job))
 
-                else:
-                    # Create new match
-                    # Serialize for the ranking function
-                    cand_serializer = CandidateSerializer(candidate)
-                    job_serializer = JobSerializer(job)
-                    candidate_data = await sync_to_async(lambda: cand_serializer.data)()
-                    job_data = await sync_to_async(lambda: job_serializer.data)()
+                        # Calculate match score and rationale
+                        result = await rank_candidate(candidate_data, job_data)
 
-                    # Calculate match score and rationale
-                    result = await rank_candidate(candidate_data, job_data)
+                        # Create and save the match
+                        match = Match(
+                            candidate=candidate,
+                            job=job,
+                            score=result['score'],
+                            rationale=result['rationale']
+                        )
+                        await save_object(match)
+                        created_matches.append(match)
 
-                    # Create and save the match
-                    match = Match(
-                        candidate=candidate,
-                        job=job,
-                        score=result['score'],
-                        rationale=result['rationale']
-                    )
-                    await sync_to_async(match.save)()
-                    created_matches.append(match)
-
-        # Return summary information
-        return Response(
-            {
-                "message": f"Created {len(created_matches)} new matches, updated {len(updated_matches)} existing matches",
-                "matches_created": len(created_matches),
-                "matches_updated": len(updated_matches)
-            },
-            status=status.HTTP_201_CREATED if created_matches else status.HTTP_200_OK
-        )
+            # Return summary information
+            return Response(
+                {
+                    "message": f"Created {len(created_matches)} new matches, updated {len(updated_matches)} existing matches",
+                    "matches_created": len(created_matches),
+                    "matches_updated": len(updated_matches)
+                },
+                status=status.HTTP_201_CREATED if created_matches else status.HTTP_200_OK
+            )
+        except Exception as e:
+            print(f"Error in match_candidates: {e}")
+            import traceback
+            traceback.print_exc()
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 # Add this helper function to convert serializer data safely
