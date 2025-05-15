@@ -64,3 +64,9 @@ Admin interface is available at http://127.0.0.1:8000/admin/ (login with the sup
 ## API Documentation
 
 For API request examples using the HTTPie tool, see [API Request Examples](docs/request-examples.md).
+
+## Front-end UI
+
+The SkillBridge UI is a Next.js app located in the `skillbridge-ui` directory.
+
+See [skillbridge-ui/README.md](./skillbridge-ui/README.md) for setup and usage instructions for the front-end.
