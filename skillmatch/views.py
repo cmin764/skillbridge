@@ -1,9 +1,7 @@
-from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, filters, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from asgiref.sync import sync_to_async
 import asyncio
 
 from .models import CVUpload, Candidate, Job, Match
